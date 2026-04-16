@@ -56,6 +56,12 @@ description: Long-running autonomous development loop for bypass-permissions ses
 - `workflows/bug.md` — bug 类任务流程
 - `safety.md` — 安全边界清单（待用户敲定）
 
+## 执行模式
+
+- **不要进入 Plan 模式**：不要使用 EnterPlanMode，不要生成计划后等用户确认。读完任务后直接开始执行。
+- **不要询问确认**：不要用 AskUserQuestion 请求许可或确认方案。skill 本身就是为无人值守设计的，安全边界由 `safety.md` 和停止条件保证。
+- 唯一"停下"的方式是触发停止条件 → 写 NEEDS_REVIEW → 结束，不是弹确认框。
+
 ## 与用户沟通
 
 - 默认不打断。进度都落到 JOURNAL，用户自己看。
