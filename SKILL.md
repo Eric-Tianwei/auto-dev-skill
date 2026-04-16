@@ -1,5 +1,6 @@
 ---
 name: auto-dev
+version: 2.0.0
 description: Long-running autonomous AI coding loop for bypass-permissions sessions. Drives development from a DAG-based plan (SEQ/AND/OR nodes) rather than a flat task list. Handles topological preprocessing of common successors, a pre-dev inquiry phase that collapses OR nodes by asking humans about constraints (not technical choices), parallel spikes for unresolved OR branches via git worktrees, per-node Plan/Dev/Test cycles with three-level failure escalation (L0 retry / L1 redesign parent / L2 abandon branch), and a git topology kept isomorphic to the DAG (or/*, and/*, spike/* branches; node/*, decision/*, spike/result-* tags). Use when the user wants an unattended Claude Code session to plan and build a multi-node feature across hours with minimal interruptions.
 ---
 
