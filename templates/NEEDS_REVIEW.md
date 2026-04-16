@@ -28,14 +28,15 @@
 
 ## 停止原因分类（便于用户扫视）
 
-- `design-blocked` — 计划阶段无法建出一致 DAG
+- `dag-schema-invalid` — `validate_dag.py` 退出码非零（schema 字段缺失、rationale 缺失、SEQ 链 > 3、环、悬空 edge 等）
+- `design-blocked` — 计划阶段无法建出一致 DAG（含：写不出 verifiable completion、估不出 scope、边分不清类型）
 - `entry-missing` — 节点前置 tag 不存在
 - `scope-overflow` — 实际改动超出节点 spec
 - `level-1-escalation` — 节点 L0 重试达上限或父约束不可达
 - `level-2-escalation` — OR 分支核心假设破产
 - `or-decision-needed` — 所有 spike 完成，等人类选 OR
 - `or-branch-review` — OR 分支全端完成，等 PR review
-- `seq-checkpoint` — 连续 2–3 个 SEQ 节点完成，请方向 sanity check
+- `seq-checkpoint` — 沿 dag.edges 回溯，连续 2–3 条 type=SEQ 边首尾相连完成，请方向 sanity check（AND 兄弟连续完成不触发）
 - `safety-boundary` — 命中 safety.md 黑名单
 - `test-baseline-regression` — 原本通过的测试现在失败
 - `protected-push-attempted` — 对 upstream_branch（默认 main）/ 受保护分支的任何写操作，或未授权 push base_branch

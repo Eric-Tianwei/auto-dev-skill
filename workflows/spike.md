@@ -4,7 +4,7 @@
 
 ## 触发
 
-`.auto-dev/state.json` 中 `phase=spike` 且 `INQUIRY.md` 的 Remaining 表非空。
+`.auto-dev/state.json` 中 `phase=spike` 且 dag.json 存在 `or_type == "B"` 且 `decided == null` 的 `or_groups[]` 条目。
 
 ## 每个 Type B OR 的处理
 
@@ -13,7 +13,7 @@
    - 要验证的**具体假设**（一句话，可证伪）。
    - **成功判据**（什么情况算这个候选可行）+ **失败判据**。
    - **预算**：最多 ≤N 文件、≤M commit、≤若干分钟（主循环设定）。
-   - **禁止**：改 `PLAN.md` / `INQUIRY.md` / `JOURNAL.md` / `NEEDS_REVIEW.md` / `.auto-dev/state.json` / `base_branch`（默认 `ai-main`）/ `upstream_branch`（默认 `main`）/ 其他 spike 分支。
+   - **禁止**：改 `.auto-dev/dag.json` / `.auto-dev/schema/` / `.auto-dev/state.json` / `PLAN.md` / `INQUIRY.md` / `JOURNAL.md` / `NEEDS_REVIEW.md` / `base_branch`（默认 `ai-main`）/ `upstream_branch`（默认 `main`）/ 其他 spike 分支。
    - **产出要求**：
      - `spike/<desc>/RESULT.md` ≤ 50 行：假设、方法、结果数据、结论（go/no-go + 依据）、风险。
      - 分支上打 tag `spike/result-<desc>`。
@@ -30,9 +30,14 @@
 
 ## 人类决策后（下一次启动）
 
-用户在 `PLAN.md` 标注选定分支后，主循环：
-1. 对每个 OR：选中候选 → `decision/selected-<branch>`；其余 → `decision/rejected-<branch>-<reason>` tag 后分支可删（tag 永久保留状态）。
-2. 更新 `.auto-dev/state.json`：`phase=dev`，`dag_cursor` 指向所选分支的首节点。
+用户在 dag.json 的 `or_groups[].decided` 字段写入获胜 OR_HEAD id（并把其余候选加入 `rejected`）。主循环：
+1. 跑 `validate_dag.py`，非零 → 停。
+2. 对每个已决策的 or_group：
+   - 获胜候选对应的 OR_HEAD 节点 `status` 保持 `"pending"`（等进 dev）。
+   - 被弃候选 OR_HEAD `status="abandoned"`。
+   - 打 git tag：`decision/selected-<branch>` 于获胜分支；`decision/rejected-<branch>-<reason>` 于每个被弃分支（tag 永久保留状态，分支可删）。
+3. 同步 PLAN.md 视图。
+4. 更新 `.auto-dev/state.json`：`phase=dev`，`dag_cursor` 指向所选分支的首节点。
 
 ## 失败处理
 

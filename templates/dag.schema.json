@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "auto-dev/dag.schema.json",
+  "title": "auto-dev DAG",
+  "description": "Machine-readable source of truth for the auto-dev plan. PLAN.md is a rendered view of this file; all workflow logic (main loop, review-gate, topology audits) reads this file, not PLAN.md prose.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "base_branch", "upstream_branch", "nodes", "edges"],
+  "properties": {
+    "version": { "const": 1 },
+    "base_branch": { "type": "string", "minLength": 1 },
+    "upstream_branch": { "type": "string", "minLength": 1 },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "or_groups": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/or_group" }
+    }
+  },
+  "$defs": {
+    "node_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "lowercase kebab-case; must match ^[a-z0-9][a-z0-9-]*$"
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "kind", "branch",
+        "entry", "completion", "scope",
+        "retry_limit", "status"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/node_id" },
+        "kind": {
+          "enum": ["COMMON", "OR_HEAD", "SEQ", "AND", "SPIKE"],
+          "description": "Structural role. COMMON = lives on base_branch. OR_HEAD = first node of an OR branch. SEQ/AND = successor on an existing branch. SPIKE = throwaway exploration."
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Git branch this node commits on. COMMON → base_branch. OR_HEAD/SEQ/AND → or/* or and/*."
+        },
+        "entry": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Preconditions (parent tags, interface contracts, env). Each item is one bullet."
+        },
+        "completion": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Verifiable completion conditions. 'Implemented X' is NOT allowed — must be runnable/observable."
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_files_changed"],
+          "properties": {
+            "max_files_changed": { "type": "integer", "minimum": 1 },
+            "max_new_dependencies": { "type": "integer", "minimum": 0 },
+            "estimated_commits": { "type": "string" }
+          }
+        },
+        "retry_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "L0 retries before escalating to L1. Convention: 2 simple, 3 normal, 5 very uncertain."
+        },
+        "escalation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "l1_trigger": { "type": "string", "minLength": 1 },
+            "l2_trigger": { "type": "string", "minLength": 1 }
+          }
+        },
+        "or_type": {
+          "enum": ["A", "B"],
+          "description": "Only set on OR_HEAD. A = human has the answer (resolve in inquiry). B = needs spike."
+        },
+        "status": {
+          "enum": [
+            "pending", "dev", "done",
+            "blocked", "pending-review",
+            "abandoned", "decided"
+          ]
+        },
+        "completion_tag": {
+          "type": ["string", "null"],
+          "description": "Set to 'node/<path>' once the node passes; null before."
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "type", "rationale"],
+      "properties": {
+        "from": { "$ref": "#/$defs/node_id" },
+        "to": { "$ref": "#/$defs/node_id" },
+        "type": {
+          "enum": ["SEQ", "AND", "OR"],
+          "description": "SEQ = real technical dependency. AND = siblings, parallelizable, same parent. OR = competing implementations, exactly one wins."
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "description": "REQUIRED. One line justifying the edge type. For SEQ: why is this a real dependency, not a habit. For AND: why parallelizable. For OR: what makes them exclusive."
+        },
+        "and_group": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required when type=AND. Siblings sharing the same and_group will merge back together."
+        },
+        "or_group": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required when type=OR. Must match an entry in or_groups[].id."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "AND" } },
+            "required": ["type"]
+          },
+          "then": { "required": ["and_group"] }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "OR" } },
+            "required": ["type"]
+          },
+          "then": { "required": ["or_group"] }
+        }
+      ]
+    },
+    "or_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "question", "or_type"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The single decision this OR represents, phrased as a question."
+        },
+        "or_type": { "enum": ["A", "B"] },
+        "candidates": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/node_id" },
+          "description": "OR_HEAD node ids, one per competing candidate."
+        },
+        "decided": {
+          "type": ["string", "null"],
+          "description": "OR_HEAD id of the winning candidate; null until human decision."
+        },
+        "rejected": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/node_id" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "base_branch": "ai-main",
+  "upstream_branch": "main",
+  "nodes": [
+    {
+      "id": "login-endpoint-stub",
+      "kind": "COMMON",
+      "branch": "ai-main",
+      "entry": [],
+      "completion": [
+        "POST /login route registered and returns 501 with a structured error body",
+        "tests/auth/stub.test.ts passes"
+      ],
+      "scope": { "max_files_changed": 2, "max_new_dependencies": 0, "estimated_commits": "1" },
+      "retry_limit": 2,
+      "status": "done",
+      "completion_tag": "node/login-endpoint-stub"
+    },
+    {
+      "id": "middleware-validation",
+      "kind": "COMMON",
+      "branch": "ai-main",
+      "entry": ["node/login-endpoint-stub exists"],
+      "completion": [
+        "req.auth populated with { token?: string } before route handlers",
+        "tests/middleware/auth.test.ts passes"
+      ],
+      "scope": { "max_files_changed": 3, "max_new_dependencies": 0, "estimated_commits": "1-2" },
+      "retry_limit": 3,
+      "status": "done",
+      "completion_tag": "node/middleware-validation"
+    },
+    {
+      "id": "or-jwt-signing",
+      "kind": "OR_HEAD",
+      "branch": "or/jwt-auth",
+      "entry": [
+        "node/middleware-validation exists",
+        "MW provides req.auth: { token?: string }"
+      ],
+      "completion": [
+        "signToken(payload, ttl) -> string and verifyToken(s) -> payload|null exposed",
+        "tests/jwt/sign.test.ts passes"
+      ],
+      "scope": { "max_files_changed": 4, "max_new_dependencies": 1, "estimated_commits": "2-3" },
+      "retry_limit": 3,
+      "escalation": {
+        "l1_trigger": "Failure consistently indicates MW does not surface token payload at expected call site",
+        "l2_trigger": "Tests show JWT cannot meet requirement (e.g. instant revocation required and blacklist excluded)"
+      },
+      "or_type": "A",
+      "status": "dev",
+      "completion_tag": null
+    },
+    {
+      "id": "or-session-store",
+      "kind": "OR_HEAD",
+      "branch": "or/session-auth",
+      "entry": ["node/middleware-validation exists"],
+      "completion": [
+        "createSession(userId) and readSession(sid) functions backed by KV store",
+        "tests/session/store.test.ts passes"
+      ],
+      "scope": { "max_files_changed": 5, "max_new_dependencies": 1, "estimated_commits": "2-3" },
+      "retry_limit": 3,
+      "or_type": "A",
+      "status": "pending",
+      "completion_tag": null
+    },
+    {
+      "id": "and-jwt-blacklist",
+      "kind": "AND",
+      "branch": "and/jwt-blacklist",
+      "entry": ["node/or-jwt-signing exists"],
+      "completion": [
+        "revokeToken(jti) and isRevoked(jti) exposed with KV backing",
+        "tests/jwt/blacklist.test.ts passes"
+      ],
+      "scope": { "max_files_changed": 3, "max_new_dependencies": 0, "estimated_commits": "1-2" },
+      "retry_limit": 3,
+      "status": "pending",
+      "completion_tag": null
+    },
+    {
+      "id": "and-jwt-rotation",
+      "kind": "AND",
+      "branch": "and/jwt-rotation",
+      "entry": ["node/or-jwt-signing exists"],
+      "completion": [
+        "rotateSigningKey() rolls kid without invalidating unexpired tokens",
+        "tests/jwt/rotation.test.ts passes"
+      ],
+      "scope": { "max_files_changed": 3, "max_new_dependencies": 0, "estimated_commits": "1-2" },
+      "retry_limit": 3,
+      "status": "pending",
+      "completion_tag": null
+    }
+  ],
+  "edges": [
+    {
+      "from": "login-endpoint-stub",
+      "to": "middleware-validation",
+      "type": "SEQ",
+      "rationale": "MW reads the route registered by the stub; must exist first"
+    },
+    {
+      "from": "middleware-validation",
+      "to": "or-jwt-signing",
+      "type": "OR",
+      "or_group": "auth-strategy",
+      "rationale": "JWT candidate for auth-strategy; mutually exclusive with session"
+    },
+    {
+      "from": "middleware-validation",
+      "to": "or-session-store",
+      "type": "OR",
+      "or_group": "auth-strategy",
+      "rationale": "Session candidate for auth-strategy; mutually exclusive with JWT"
+    },
+    {
+      "from": "or-jwt-signing",
+      "to": "and-jwt-blacklist",
+      "type": "AND",
+      "and_group": "jwt-extensions",
+      "rationale": "Blacklist and rotation share jwt-signing contract; no inter-dependency between them"
+    },
+    {
+      "from": "or-jwt-signing",
+      "to": "and-jwt-rotation",
+      "type": "AND",
+      "and_group": "jwt-extensions",
+      "rationale": "Rotation is independent of blacklist; both consume signToken/verifyToken only"
+    }
+  ],
+  "or_groups": [
+    {
+      "id": "auth-strategy",
+      "question": "JWT vs session-backed auth for this service",
+      "or_type": "A",
+      "candidates": ["or-jwt-signing", "or-session-store"],
+      "decided": null,
+      "rejected": []
+    }
+  ]
+}

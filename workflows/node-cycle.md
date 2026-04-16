@@ -4,17 +4,17 @@
 
 ## 进入节点
 
-1. 读 `PLAN.md` 中当前节点的规范（entry / completion / scope / retry N / L1 触发 / L2 触发）。
-2. 切到正确分支（`<base>` 指 `.auto-dev/state.json.base_branch`，默认 `ai-main`）：
-   - SEQ 节点：留在父分支上线性 commit。
-   - AND 节点：`git checkout -b and/<parent>-<desc>` 从父切出。
-   - OR 分支首节点：从 common successor tag 切 `or/<desc>`。**切出前执行一次 upstream → base 同步检查**（见 SKILL.md「同步协议」）。
-   - Common successor：**本地 `<base>` 分支**（由 safety.md 允许）。**绝不**切到 `main` / `master`。
-3. 更新 `.auto-dev/state.json`：`current_node` / `current_branch` / `retry_count=0`。
+1. **从 `.auto-dev/dag.json` 读当前节点对象**（字段：`entry` / `completion` / `scope` / `retry_limit` / `escalation.l1_trigger` / `escalation.l2_trigger` / `kind` / `branch`）。PLAN.md 仅做人类视图参考，不作为判据。
+2. 切到正确分支（`<base>` 指 `.auto-dev/state.json.base_branch`，默认 `ai-main`），分支值取 dag.json 的 `nodes[].branch`：
+   - `kind == "SEQ"`：留在父分支上线性 commit。
+   - `kind == "AND"`：`git checkout -b and/<parent>-<desc>` 从父切出。
+   - `kind == "OR_HEAD"`：从 common successor tag 切 `or/<desc>`。**切出前执行一次 upstream → base 同步检查**（见 SKILL.md「同步协议」）。
+   - `kind == "COMMON"`：**本地 `<base>` 分支**（由 safety.md 允许）。**绝不**切到 `main` / `master`。
+3. 更新 `.auto-dev/state.json`：`current_node` / `current_branch` / `retry_count=0`；把 dag.json 里该节点 `status` 改为 `"dev"`。
 
 ## Plan（进 dev 前）
 
-- 确认所有 entry assumptions 对应的 tag 已存在（`git tag -l node/<prerequisite>`）。
+- 遍历 dag.json 里该节点的 `entry` 字符串数组，对每项里引用的 `node/<id>` tag 执行 `git tag -l` 确认存在。
 - 缺失 → 写 NEEDS_REVIEW（`entry-missing`）停。
 
 ## Dev
@@ -55,10 +55,12 @@
    - 有实质问题 → 处理后重 test。
 2. **Commit**：消息格式 `<type>(<node-id>): <summary>`，body 含 completion 通过证据一句话。
 3. **Tag**：`git tag node/<path>`（path 由 DAG 位置确定，例如 `node/or-jwt-signing`）。
-4. **AND merge-back**（只限 AND 节点）：回父分支，`git merge --no-ff and/<parent>-<desc>`，在父分支打 tag 标记该 AND 已回合。
-5. **JOURNAL**：追加一段（时间 / tag / 结论 / 下一节点）。
-6. **state.json 更新**：`last_tag` / `dag_cursor` 指向下一节点；`retry_count=0`。
-7. **review-gate 触发检查**：见 `workflows/review-gate.md`。触发 → 停；否则 → 回主循环取下个节点。
+4. **AND merge-back**（只限 `kind == "AND"` 的节点）：回父分支，`git merge --no-ff and/<parent>-<desc>`，在父分支打 tag 标记该 AND 已回合。
+5. **更新 dag.json**：把该节点 `status` 改为 `"done"`，`completion_tag` 写入刚打的 git tag 名（例如 `"node/or-jwt-signing"`）。然后跑 `python3 scripts/validate_dag.py .auto-dev/dag.json` 确认仍过 schema；非零 → 停（`dag-schema-invalid`）。
+6. **同步 PLAN.md 视图**：更新节点表里该行的 status / completion tag 列。字段以 dag.json 为准。
+7. **JOURNAL**：追加一段（时间 / tag / 结论 / 下一节点）。
+8. **state.json 更新**：`last_tag` / `dag_cursor` 指向下一节点；`retry_count=0`。下一节点选择按 dag.json 拓扑序：所有入边的 `from` 节点 `status == "done"` 且该节点 `status == "pending"` 即可开工；common successor 优先，否则沿已进入的 OR 分支推进。
+9. **review-gate 触发检查**：见 `workflows/review-gate.md`，按 dag.edges 判定 seq-checkpoint。触发 → 停；否则 → 回主循环取下个节点。
 
 ## 禁止
 

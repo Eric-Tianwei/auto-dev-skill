@@ -11,7 +11,7 @@
 | Type A | 人类已有答案，只是还没说 | **问一下就塌缩**，不用 spike |
 | Type B | 人类自己也不确定，需看数据 | 问没用，排到 spike 队列 |
 
-判型在每个 OR 节点的规范里明确标记。判不清时默认 Type B（保守）。
+判型在 dag.json 的 `or_groups[].or_type` 字段里显式标记（同时每个 OR_HEAD 节点的 `or_type` 字段保持一致）。判不清时默认 Type B（保守）。
 
 ## 核心翻译规则
 
@@ -65,11 +65,15 @@ Score(Q) = 这个问题的任一答案能折叠的 OR 节点数量
 |---------|-----------|-------------|
 
 ## Updated DAG
-（被塌缩的分支在 PLAN.md 里直接标 decided，剩余 OR 保持 open）
+（改动落在 dag.json，PLAN.md 视图同步）
 ```
 
-同时更新 `PLAN.md` 里被折叠节点的状态，更新 `.auto-dev/state.json`：
-- 仍有 Type B OR → `phase=spike`
+**更新 dag.json**（source of truth）：
+- 被塌缩的 OR：`or_groups[].decided` 设为获胜 OR_HEAD 的 id；被弃候选 id 加入 `or_groups[].rejected`；被弃的 OR_HEAD 节点 `status="abandoned"`；获胜的保持 `"pending"` 等进 dev。
+- 改完跑 `python3 scripts/validate_dag.py .auto-dev/dag.json`，非零 → 停（`dag-schema-invalid`）。
+
+再同步 PLAN.md 的节点表 / OR 候选对照，更新 `.auto-dev/state.json`：
+- 仍有 `or_type == "B"` 且未 decided 的 or_group → `phase=spike`
 - 无 → `phase=dev`
 
 ## 注意
@@ -77,4 +81,4 @@ Score(Q) = 这个问题的任一答案能折叠的 OR 节点数量
 - 问题必须是**人类不用翻代码就能答**的。需要人类研究才能答的 → 改做 spike。
 - 不要问"你更喜欢 A 还是 B"。偏好不是约束。
 - Inquiry 总问题数的软上限：6。超了说明 design 里 OR 过多或 Type 判错。
-- 此阶段禁止写代码、切分支、改 PLAN 以外的状态。
+- 此阶段禁止写代码、切分支。允许改动仅限：dag.json（折叠 OR / 更新 or_groups）、PLAN.md（同步视图）、INQUIRY.md、state.json。
