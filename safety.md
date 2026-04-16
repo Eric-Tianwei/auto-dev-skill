@@ -16,7 +16,7 @@
 - `git push`（任何形式）
 - `git push --force` / `--force-with-lease`
 - 删除分支（`git branch -D`、`git push --delete`）
-- 改 `main` / `master` / 受保护分支的内容
+- 向远端 push `main` / `master` / 受保护分支（任何形式，含 `--force*`）。注意：**本地** `main` commit 合法——common successor 节点按设计就落在本地 main。
 - `git reset --hard` 到丢弃工作中的 commit
 - `git commit --no-verify` 跳过 hook
 - 改 `git config`
