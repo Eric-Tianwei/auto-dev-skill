@@ -21,7 +21,7 @@ flowchart TD
   classDef pending fill:#eee
 ```
 
-> common successor（LOGIN, MW）落在 main。OR 从 MW 的 tag 分出，OR 之间不会合并——由人类决策后只有一条 merge 回 main。
+> common successor（LOGIN, MW）落在 `ai-main`（AI 基线分支）。OR 从 MW 的 tag 分出，OR 之间不会合并——由人类决策后只有一条留下；最终 `ai-main` → `main` 的 PR 由人类发起，AI 不碰 `main`。
 
 ---
 
@@ -29,8 +29,8 @@ flowchart TD
 
 | id | 类型 | 边关系 | 分支 | 状态 | 完成 tag |
 |----|------|--------|------|------|----------|
-| login-endpoint-stub | COMMON | → middleware-validation | main | done | `node/login-endpoint-stub` |
-| middleware-validation | COMMON | login-endpoint-stub → | main | done | `node/middleware-validation` |
+| login-endpoint-stub | COMMON | → middleware-validation | ai-main | done | `node/login-endpoint-stub` |
+| middleware-validation | COMMON | login-endpoint-stub → | ai-main | done | `node/middleware-validation` |
 | or-jwt-signing | OR/首 | MW → | or/jwt-auth | dev | — |
 | or-jwt-refresh | SEQ | or-jwt-signing → | or/jwt-auth | pending | — |
 | and-jwt-blacklist | AND | or-jwt-signing → (回合) | and/jwt-auth-blacklist | pending | — |

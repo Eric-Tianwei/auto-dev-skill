@@ -1,6 +1,6 @@
 ---
 name: auto-dev
-version: 2.0.0
+version: 2.1.0
 description: Long-running autonomous AI coding loop for bypass-permissions sessions. Drives development from a DAG-based plan (SEQ/AND/OR nodes) rather than a flat task list. Handles topological preprocessing of common successors, a pre-dev inquiry phase that collapses OR nodes by asking humans about constraints (not technical choices), parallel spikes for unresolved OR branches via git worktrees, per-node Plan/Dev/Test cycles with three-level failure escalation (L0 retry / L1 redesign parent / L2 abandon branch), and a git topology kept isomorphic to the DAG (or/*, and/*, spike/* branches; node/*, decision/*, spike/result-* tags). Use when the user wants an unattended Claude Code session to plan and build a multi-node feature across hours with minimal interruptions.
 ---
 
@@ -13,12 +13,13 @@ description: Long-running autonomous AI coding loop for bypass-permissions sessi
 ```
 1. Depth causes drift          → minimize SEQ chain length
 2. OR nodes                    → primary human decision points
-3. Common successor nodes      → land on main before branching
+3. Common successor nodes      → land on base_branch before branching (default: ai-main, NOT main)
 4. Every node                  → entry assumptions + verifiable completion condition + scope limit + retry limit
 5. Test failure escalates      → L0 retry (in-node) → L1 redesign (modify parent) → L2 abandon (new OR candidate)
 6. Git topology                → must be isomorphic to DAG topology
 7. Inquiry rule                → never ask humans to pick a technical option; ask about the constraint that picks it
 8. OR branches                 → never merged with siblings; only one wins, the other is tagged and archived
+9. AI never touches upstream   → main/master is human-only; AI works on base_branch (ai-main) and humans promote
 ```
 
 ## 核心文件（项目根）
@@ -33,16 +34,47 @@ description: Long-running autonomous AI coding loop for bypass-permissions sessi
 {
   "plan_path": "PLAN.md",
   "phase": "design|inquiry|spike|dev|review-gate",
+  "base_branch": "ai-main",
+  "upstream_branch": "main",
+  "last_upstream_sync": "<ISO timestamp or null>",
   "current_node": "<node id or null>",
   "current_branch": "<branch>",
   "retry_count": 0,
   "retry_limit_from_spec": 3,
   "dag_cursor": "<next node id or null>",
-  "last_tag": "node/..."
+  "last_tag": "node/...",
+  "skill_version": "2.1.0"
 }
 ```
 
 这些文件的位置固定，不要放到别处。
+
+## Base branch 与 upstream 同步协议
+
+AI 在 `base_branch`（默认 `ai-main`）上工作；`upstream_branch`（默认 `main`）是人类主线。两者职责分离：
+
+| 动作 | 允许方 | 说明 |
+|------|--------|------|
+| `base_branch` 本地 commit（common successor 落点） | AI | 核心工作模式 |
+| 从 `base_branch` 开 `or/*` `and/*` `spike/*` 分支 | AI | 必须从 `base_branch` 出，不得从 upstream 出 |
+| `git push` `base_branch` 到远端 | AI 不得 | 除非用户在 safety.md 显式授权 |
+| `base_branch` → `upstream_branch` 合并/PR | 仅人类 | AI 从不触发；这是人类 review 边界 |
+| `upstream_branch` → `base_branch` 同步 | AI 可触发 | 见下方 |
+| 直接 commit / push 到 `upstream_branch` | AI 绝不 | 任何形式均触发 `protected-push-attempted` 停下 |
+
+**首次初始化**（`phase=design` 进入时）：
+- `.auto-dev/state.json` 不存在 → 读取/询问 `base_branch` 与 `upstream_branch`，默认 `ai-main` / `main`。
+- 若 `base_branch` 分支不存在 → 从当前 HEAD（通常是 upstream 最新）创建：`git branch ai-main && git checkout ai-main`。
+
+**Upstream → base 同步时机**：
+- 每次 `phase` 从 `design` 或 `review-gate` 切到 `dev` 时检查一次。
+- 每次新开 OR 分支前检查一次（OR 首节点 `git checkout -b or/*` 之前）。
+- 检查命令：`git fetch && git log --oneline base_branch..upstream_branch`。若有新 commit：
+  - 无冲突可快进 / 简单 merge → AI 自行 `git merge --ff-only upstream_branch`（或 `--no-ff`），追加 JOURNAL 一行。
+  - 有冲突 → 停下写 NEEDS_REVIEW（`upstream-sync-conflict`），等人类处理。
+
+**base → upstream 交付**（只由人类执行）：
+- AI 遇到 `or-branch-review` 等 review-gate 时停下并写 NEEDS_REVIEW，指引用户在人类环境下发起 PR 从 `base_branch`（或 `or/*`）到 `upstream_branch`。AI 不 push、不开 PR、不 merge upstream。
 
 ## 主循环（DAG 游标驱动）
 
@@ -65,7 +97,9 @@ description: Long-running autonomous AI coding loop for bypass-permissions sessi
 - SEQ 链 checkpoint（每 2–3 个连续 SEQ 节点）→ 停，方向 sanity check。
 - 命中 `safety.md` 黑名单。
 - 测试基线相对 DAG 起始 commit 回退（原本通过的用例现在失败）。
-- 向远端 push `main` / `master` / 受保护分支（任何形式） → 停。注意：本地 main commit 合法（common successor 合法落点）。
+- 对 `upstream_branch`（默认 `main`）/ `master` 的任何写操作（本地 commit、checkout 后 commit、merge、rebase、push） → 停。本地 main 也禁止 —— AI 的落点永远是 `base_branch`。
+- 向远端 push `base_branch`（默认 `ai-main`）/ 受保护分支（除非 safety.md 显式授权） → 停。
+- `upstream_branch` → `base_branch` 同步出现冲突 → 停（`upstream-sync-conflict`）。
 - 需要的凭证/外部服务不可用。
 
 停下时：`NEEDS_REVIEW.md` 追加一段（时间、节点 id / tag、停止原因 tag、现象、已尝试、建议），结束会话，不要自己绕过。

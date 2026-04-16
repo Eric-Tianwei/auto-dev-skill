@@ -33,7 +33,9 @@
 每条 SEQ 边问："真依赖还是习惯？" 习惯改 AND。目标：**无人类 checkpoint 的 SEQ 链 ≤ 3 节点**。
 
 ### 4. 拓扑预处理（找 common successor）
-对每个 OR 节点：找所有分支都会到达的下游节点 → **移到 main，排在 OR 分支之前**。否则 common successor 在每个 OR 分支里各实现一次，重复且 review 噪声大。
+对每个 OR 节点：找所有分支都会到达的下游节点 → **移到 `base_branch`（默认 `ai-main`），排在 OR 分支之前**。否则 common successor 在每个 OR 分支里各实现一次，重复且 review 噪声大。
+
+注意：这里的 "base_branch" 是 `.auto-dev/state.json` 里的字段，默认 `ai-main`。`main` 是人类 upstream，AI 不往那里落。
 
 ### 5. 节点规范
 每个节点按 `templates/NODE.md` 写 entry/completion/scope/retry/escalation。这是 DESIGN 的最终产物，没有它不进 dev。

@@ -13,7 +13,7 @@
    - 要验证的**具体假设**（一句话，可证伪）。
    - **成功判据**（什么情况算这个候选可行）+ **失败判据**。
    - **预算**：最多 ≤N 文件、≤M commit、≤若干分钟（主循环设定）。
-   - **禁止**：改 `PLAN.md` / `INQUIRY.md` / `JOURNAL.md` / `NEEDS_REVIEW.md` / `.auto-dev/state.json` / main 分支 / 其他 spike 分支。
+   - **禁止**：改 `PLAN.md` / `INQUIRY.md` / `JOURNAL.md` / `NEEDS_REVIEW.md` / `.auto-dev/state.json` / `base_branch`（默认 `ai-main`）/ `upstream_branch`（默认 `main`）/ 其他 spike 分支。
    - **产出要求**：
      - `spike/<desc>/RESULT.md` ≤ 50 行：假设、方法、结果数据、结论（go/no-go + 依据）、风险。
      - 分支上打 tag `spike/result-<desc>`。

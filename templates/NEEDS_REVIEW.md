@@ -38,7 +38,8 @@
 - `seq-checkpoint` — 连续 2–3 个 SEQ 节点完成，请方向 sanity check
 - `safety-boundary` — 命中 safety.md 黑名单
 - `test-baseline-regression` — 原本通过的测试现在失败
-- `protected-push-attempted` — 尝试 push main / 受保护分支
+- `protected-push-attempted` — 对 upstream_branch（默认 main）/ 受保护分支的任何写操作，或未授权 push base_branch
+- `upstream-sync-conflict` — `upstream_branch → base_branch` 同步出现冲突，需人类解决
 - `missing-credential` — 外部凭证/服务不可用
 - `cannot-reproduce` — （节点为 bug 型时）按 repro 无法复现
 - `missing-info` — 节点描述不足以动工

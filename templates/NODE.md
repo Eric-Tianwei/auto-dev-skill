@@ -30,7 +30,7 @@
 - L2 trigger: <具体条件，例如"父节点改动后失败模式不变"或"本 OR 分支核心假设与需求矛盾"。>
 
 **Git 操作**
-- 分支：`<or/jwt-auth | and/jwt-blacklist | main>`
+- 分支：`<or/jwt-auth | and/jwt-blacklist | ai-main>`（common successor 落在 `base_branch`，默认 `ai-main`；不是 `main`）
 - SEQ / AND / common successor：<本节点类型>
 - 完成 tag：`node/<path>`
 

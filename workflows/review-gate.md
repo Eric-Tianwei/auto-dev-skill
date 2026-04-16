@@ -7,14 +7,15 @@
 | 触发 | 停止原因 tag | NEEDS_REVIEW 内容要点 |
 |------|-------------|----------------------|
 | 所有 spike 完成，OR 候选结论齐 | `or-decision-needed` | 每个 OR 的候选列表、spike 结论、分支 tag、建议选哪条（可有可无） |
-| 某条 OR 分支从首节点到终节点全部 node tag 完成 | `or-branch-review` | 分支名、覆盖节点列表、`git diff main or/<x>` 指引 |
+| 某条 OR 分支从首节点到终节点全部 node tag 完成 | `or-branch-review` | 分支名、覆盖节点列表、`git diff <base_branch> or/<x>` 指引（人类 review 后自行 PR 到 `upstream_branch`） |
 | 节点升 L1 | `level-1-escalation` | 节点 id、失败 tag、父节点 id、建议的父修改方向 |
 | 节点升 L2 | `level-2-escalation` | OR 分支名、`decision/abandoned-*` tag、根因、建议的新 OR 候选方向（一句话） |
 | 连续 2–3 个 SEQ 节点完成且中间未经 checkpoint | `seq-checkpoint` | 已完成节点 tag 序列、当前累计 diff 范围、一句话方向 sanity check 请求 |
 | 命中 `safety.md` 黑名单 | `safety-boundary` | 触碰的条款、尝试的操作、建议的替代路径 |
 | 测试基线回退 | `test-baseline-regression` | 回退测试列表、最近 node tag、怀疑的 commit |
 | 任务要求的凭证/服务不可用 | `missing-credential` | 缺什么、在哪能配 |
-| 向远端 push main / 受保护分支 | `protected-push-attempted` | 触发命令、目标 ref、原因 |
+| 对 `upstream_branch` / `master` 的任何写操作，或向远端 push 受保护分支 | `protected-push-attempted` | 触发命令、目标 ref、原因 |
+| `upstream_branch → base_branch` 同步出现冲突 | `upstream-sync-conflict` | 冲突文件列表、upstream 最新 commit、base_branch 当前 HEAD、建议的解冲突方向 |
 
 ## 不触发检查点的场景（继续 autonomous）
 
@@ -22,7 +23,8 @@
 - AND 分支 merge 回父分支。
 - 单节点 completion tag。
 - 每次 commit。
-- 本地 main 的 common successor commit。
+- 本地 `base_branch`（默认 `ai-main`）的 common successor commit。
+- 无冲突的 `upstream_branch → base_branch` 同步 merge。
 - Inquiry 阶段的 AskUserQuestion（那不是 review-gate，是 inquiry 内机制）。
 
 ## 写 NEEDS_REVIEW 的格式

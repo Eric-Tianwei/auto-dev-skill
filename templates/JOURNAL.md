@@ -6,11 +6,11 @@
 
 ---
 
-## 2026-04-15 14:05 · node/login-endpoint-stub · main
+## 2026-04-15 14:05 · node/login-endpoint-stub · ai-main
 - 结论: common successor 完成，stub 返回 501 + 记录 req.auth 位
-- 下一: main 上做 middleware-validation
+- 下一: ai-main 上做 middleware-validation
 
-## 2026-04-15 14:20 · node/middleware-validation · main
+## 2026-04-15 14:20 · node/middleware-validation · ai-main
 - 结论: 中间件提取 token 并挂到 req.auth；覆盖 5 个用例；全量测试无回退
 - 下一: 从此 tag 开出 or/jwt-auth 和 or/session-auth
 
@@ -19,7 +19,7 @@
 - 停止原因: OR 决策待人类，详见 NEEDS_REVIEW.md
 - 状态: PLAN 中两个 OR 保持 open
 
-## 2026-04-15 15:10 · decision/selected-jwt-auth · main
+## 2026-04-15 15:10 · decision/selected-jwt-auth · ai-main
 - 结论: 用户确认选 jwt；session 候选打 decision/rejected-session-auth-stateless-requirement
 - 下一: 在 or/jwt-auth 开始做 or-jwt-signing
 

@@ -4,8 +4,9 @@
 
 ## 初稿：默认允许（白名单）
 
-- 本地 commit（在非 main 分支）
-- 建分支、切分支、建 worktree
+- 本地 commit（在 `base_branch` 即默认 `ai-main`，以及 `or/*` `and/*` `spike/*` 派生分支上）
+- 建分支、切分支、建 worktree（分支名必须属于 `ai-main` / `or/*` / `and/*` / `spike/*` / `failed/*` 命名空间）
+- 从 `upstream_branch`（默认 `main`）往 `base_branch` 做**快进或无冲突 merge**（单向 pull）
 - 安装项目依赖（`npm i` / `bun add` / `pip install -r`）到项目本地
 - 跑项目脚本：测试、类型检查、lint、build、dev server
 - 读写项目工作目录下的文件
@@ -16,7 +17,9 @@
 - `git push`（任何形式）
 - `git push --force` / `--force-with-lease`
 - 删除分支（`git branch -D`、`git push --delete`）
-- 向远端 push `main` / `master` / 受保护分支（任何形式，含 `--force*`）。注意：**本地** `main` commit 合法——common successor 节点按设计就落在本地 main。
+- **对 `upstream_branch`（默认 `main`） / `master` 的任何写操作**：`git checkout main && commit` / `git merge ... main`（把别的往 main 合）/ `git rebase` 改写 main 历史 / push 到 main。本地也禁止。AI 的落点只有 `base_branch`。
+- `base_branch` → `upstream_branch` 的合并 / PR（无论本地 `git merge` 还是远端 PR 发起）——这是人类专有的 promotion 动作。
+- `upstream_branch` → `base_branch` 同步出现冲突时自行解决（必须停下让人处理）。
 - `git reset --hard` 到丢弃工作中的 commit
 - `git commit --no-verify` 跳过 hook
 - 改 `git config`

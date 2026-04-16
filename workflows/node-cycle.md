@@ -5,11 +5,11 @@
 ## 进入节点
 
 1. 读 `PLAN.md` 中当前节点的规范（entry / completion / scope / retry N / L1 触发 / L2 触发）。
-2. 切到正确分支：
+2. 切到正确分支（`<base>` 指 `.auto-dev/state.json.base_branch`，默认 `ai-main`）：
    - SEQ 节点：留在父分支上线性 commit。
    - AND 节点：`git checkout -b and/<parent>-<desc>` 从父切出。
-   - OR 分支首节点：从 common successor tag 切 `or/<desc>`。
-   - Common successor：**本地 main**（由 safety.md 允许）。
+   - OR 分支首节点：从 common successor tag 切 `or/<desc>`。**切出前执行一次 upstream → base 同步检查**（见 SKILL.md「同步协议」）。
+   - Common successor：**本地 `<base>` 分支**（由 safety.md 允许）。**绝不**切到 `main` / `master`。
 3. 更新 `.auto-dev/state.json`：`current_node` / `current_branch` / `retry_count=0`。
 
 ## Plan（进 dev 前）
