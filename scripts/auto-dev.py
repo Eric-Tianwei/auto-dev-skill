@@ -267,7 +267,8 @@ def template_body() -> str:
 
 
 def gen_node_md(nid: str, name: str | None, desc: str | None,
-                deps: list[str], branch: str, or_of: str | None) -> str:
+                deps: list[str], branch: str, or_of: str | None,
+                body: str | None = None) -> str:
     fm = [
         f"name: {name or nid}",
         f"description: {desc or '<one-line purpose>'}",
@@ -276,7 +277,8 @@ def gen_node_md(nid: str, name: str | None, desc: str | None,
     ]
     if or_of:
         fm.append(f"or_candidate_of: {or_of}")
-    return _assemble(fm, template_body().splitlines())
+    body_text = body if body is not None else template_body()
+    return _assemble(fm, body_text.splitlines())
 
 
 # ---------- state helpers ----------
@@ -371,13 +373,16 @@ def cmd_node_add(args: argparse.Namespace) -> int:
 
     save_dag_checked(dag)
 
+    body = sys.stdin.read() if args.body_stdin else None
+
     md_path = NODES_DIR / f"{args.id}.md"
     md_path.write_text(
-        gen_node_md(args.id, args.name, args.desc, deps, branch, or_of),
+        gen_node_md(args.id, args.name, args.desc, deps, branch, or_of, body=body),
         encoding="utf-8",
     )
 
-    emit(f"+ node:{args.id} deps=[{','.join(deps)}] branch={branch}")
+    body_marker = " body=stdin" if args.body_stdin else ""
+    emit(f"+ node:{args.id} deps=[{','.join(deps)}] branch={branch}{body_marker}")
     for d in deps:
         emit(f"+ edge:{d}→{args.id}")
     if or_of is not None:
@@ -787,6 +792,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="attach to an existing OR group (group must be created first)")
     na.add_argument("--name", default=None, help="frontmatter name (default: <id>)")
     na.add_argument("--desc", default=None, help="frontmatter description")
+    na.add_argument("--body-stdin", dest="body_stdin", action="store_true",
+                    help="read node body (sections after frontmatter) from stdin; "
+                         "use with a heredoc to write Entry/Completion/etc in one call")
     na.set_defaults(func=cmd_node_add)
     nr = node_sub.add_parser("rm", help="remove node; cascades to edges, child deps, OR groups")
     nr.add_argument("id")

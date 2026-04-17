@@ -15,22 +15,51 @@ CLI 调用形式见 SKILL.md 的"CLI 速查"。下文写 `auto-dev` 为简称。
 
 ### 1. 列节点（两阶段法，推荐）
 
-**阶段 1a——只列节点，不想依赖**：
+**阶段 1a+1b——用 `--body-stdin` 一次建节点 + 填 body（推荐）**：
 
-对每个要做的事跑 `auto-dev node add <id> [--branch ...] [--desc ...]`，**`--deps` 留空**。目的是先把分解做完，不要一边分解一边猜依赖。
+```bash
+auto-dev node add checkout --desc "checkout flow" --body-stdin <<'EOF'
+## Entry
 
-- `id` 小写 kebab-case。CLI 会从 `templates/node.md` 生成 `.auto-dev/nodes/<id>.md` 骨架并登记到 `dag.json`。
-- `--branch` 按惯例：common successor 落在 base_branch（默认 `ai-main`，可省略）；OR 候选首节点 `or/<desc>`；AND 节点 `and/<parent>-<desc>`。
+- JWT 中间件 `validate()` 可用
+- 购物车 `addItem` / `removeItem` 可用
 
-**阶段 1b——填每个节点的 Entry / Completion**：
+## Completion
 
-手动 Edit 每个 `.auto-dev/nodes/<id>.md` 的正文，重点写清：
+- [ ] POST /checkout 返回 201 + 订单 id
+- [ ] tests/checkout.e2e.ts 全绿
 
-- `## Entry`：本节点开工前需要的前置（**"needs"**）——比如"JWT 中间件 `validate()` 可用"、"购物车 `addItem` 可用"。这是后面连边的依据。
-- `## Completion`：本节点产出什么可验证结果（**"produces"**）——比如"`validate(req,res,next)` 导出"、"tests/X.test.ts 全绿"。
-- `## Scope` / `## Retry` / `## Escalation`：按模板填。
+## Scope
 
-`completion` 必须可跑或可看，不能只写"实现了 X"。
+- max_files: 5
+- max_new_deps: 0
+- estimated_commits: 2
+
+## Retry
+
+- limit: 3
+
+## Escalation
+
+- 卡支付回调就把 payment-callback 拆成新节点
+EOF
+```
+
+**每个节点一个 Bash heredoc 调用搞定**。`--deps` 先留空（阶段 1c 补边），也可以直接 `--deps a,b` 一步到位。
+
+每个 body 里必须写清：
+
+- `## Entry`——本节点开工前需要的前置（**"needs"**）。这是后面连边的依据。
+- `## Completion`——本节点产出的可验证结果（**"produces"**）。必须可跑或可看，不能只写"实现了 X"。
+- `## Scope`——`max_files` / `max_new_deps` / `estimated_commits`。
+- `## Retry`——`limit`（简单 2 / 一般 3 / 不确定 5）。
+- `## Escalation`——重试耗尽时的动作建议（改节点 md / 改图结构 / 弃 OR 分支）。
+
+`id` 小写 kebab-case。`--branch` 按惯例：common successor 落 base_branch（默认 `ai-main`，可省）；OR 候选首节点 `or/<desc>`；AND 节点 `and/<parent>-<desc>`。
+
+> **为什么走 stdin**：不走 `--body-stdin` 的话，AI 要 Read 模板 + 多次 Edit 占位符，10 节点就是 60+ 工具调用。heredoc 一次灌完是 10 次。
+
+如果节点已经建好、只想微调某段，直接 Edit 节点 md 即可（不是 stdin 路径的用例）。
 
 **阶段 1c——看一屏连边**：
 

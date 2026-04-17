@@ -1,6 +1,6 @@
 ---
 name: auto-dev
-version: 3.1.0
+version: 3.2.0
 description: Long-running autonomous AI coding loop for bypass-permissions sessions. Plans as a DAG of per-node markdown specs plus a minimal JSON skeleton — not a giant narrated plan. Orchestration decisions (node / edge / or / phase) go through the `auto-dev` CLI, which emits event lines and an append-only events.log so the causal chain survives context compaction. Two workflows (plan / run), two-action failure handling (retry / stop for human reorchestration), validator only catches JSON/topology collapse and leaves graph quality to the AI. Use when the user wants an unattended Claude Code session to plan and build a multi-node feature across hours with minimal interruptions.
 ---
 
@@ -33,7 +33,7 @@ description: Long-running autonomous AI coding loop for bypass-permissions sessi
 | 命令 | 作用 |
 |---|---|
 | `init [--base B] [--upstream U] [--force]` | 建 `.auto-dev/` 骨架（dag.json / state.json / nodes/ / schema/ / events.log） |
-| `node add <id> [--deps a,b] [--branch B] [--or-of G] [--name N] [--desc D]` | 建节点：写 `.auto-dev/nodes/<id>.md`、登记 `dag.nodes`、连 deps 边 |
+| `node add <id> [--deps a,b] [--branch B] [--or-of G] [--name N] [--desc D] [--body-stdin]` | 建节点：写 `.auto-dev/nodes/<id>.md`、登记 `dag.nodes`、连 deps 边。`--body-stdin` 时从 stdin 读 body（heredoc 一次写完 Entry/Completion/Scope/Retry/Escalation，**推荐首次填充走这条路**，省 Read+多次 Edit 的 round-trip） |
 | `node rm <id>` | 删节点 + 级联边 + 同步子节点 md `deps` + OR 组候选清理（<2 连带删组） |
 | `node status <id> <pending\|dev\|done\|blocked\|abandoned> [--tag T]` | 改状态（done 时带 tag） |
 | `edge add <from> <to>` / `edge rm <from> <to>` | 补/删边；自动同步 `<to>.md` frontmatter `deps` |
