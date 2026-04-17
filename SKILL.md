@@ -1,6 +1,6 @@
 ---
 name: auto-dev
-version: 3.3.0
+version: 3.3.1
 description: Long-running autonomous AI coding loop for bypass-permissions sessions. Plans as a DAG of per-node markdown specs plus a minimal JSON skeleton — not a giant narrated plan. Orchestration decisions (node / edge / or / phase) go through the `auto-dev` CLI, which emits event lines and an append-only events.log so the causal chain survives context compaction. Two workflows (plan / run), two-action failure handling (retry / stop for human reorchestration), validator only catches JSON/topology collapse and leaves graph quality to the AI. Use when the user wants an unattended Claude Code session to plan and build a multi-node feature across hours with minimal interruptions.
 ---
 

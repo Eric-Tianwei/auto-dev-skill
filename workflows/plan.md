@@ -50,7 +50,7 @@ EOF
 每个 body 里必须写清：
 
 - `## Entry`——本节点开工前需要的前置（**"needs"**）。这是后面连边的依据。
-- `## Completion`——本节点产出的可验证结果（**"produces"**）。必须可跑或可看，不能只写"实现了 X"。
+- `## Completion`——本节点产出的可验证结果（**"produces"**）。必须可跑或可看，不能只写"实现了 X"。**命令必须 non-interactive**（用 `jest --ci` / `vitest run` / `next build`，不要写 `jest --watch` / `next dev` 这种永不返回的命令）——run 阶段每条 Completion 命令都会显式传 Bash timeout，卡住就算超时失败。
 - `## Scope`——`max_files` / `max_new_deps` / `estimated_commits`。
 - `## Retry`——`limit`（简单 2 / 一般 3 / 不确定 5）。
 - `## Escalation`——重试耗尽时的动作建议（改节点 md / 改图结构 / 弃 OR 分支）。

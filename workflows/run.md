@@ -49,9 +49,19 @@ auto-dev node status <id> dev
 
 跑节点 Completion 指定的测试 + 项目全量测试。
 
+**运行纪律（防卡住）**：
+
+- **每条命令必须显式传 Bash `timeout` 参数**。不要用默认 2 分钟也不要传 10 分钟"图省心"——挑一个贴合该命令的预算。参考档：单元/lint/typecheck 180000（3 分钟）；build/集成测试 600000（10 分钟，已是上限）。
+- **命令必须 non-interactive**：用 `jest --ci` / `vitest run` / `next build` 这种一次性命令；不要跑带 watch/serve 的东西（`jest --watch` / `next dev`）阻塞等待。
+- **预期 >60s 的命令**（build、e2e、大测试套）用 `run_in_background: true` 启动 + `Monitor` 流式观察 stdout；不要用 Bash 阻塞调用等半天。
+- **超时 = 该条测试失败**，不是"再等等看"。失败按下面处理。
+
+结果分流：
+
 - **通过** → 进通过流程。
 - **基线回退**（原本通过的测试现在失败）→ 停（`test-baseline-regression`）。
-- **失败** → retry_count += 1（这是少数仍需手动 Edit state.json 的场景，因为 CLI 不自动 +1）：
+- **超时**（Bash 返回 timeout 错误或 Monitor 判定进程挂死）→ retry_count += 1；**连续 ≥2 次超时直接停（`node-timeout`），不走常规 retry limit**——超时通常是环境 / 预算 / 命令选错，盲目重试就是浪费墙钟。NEEDS_REVIEW 里建议：提高 timeout / 改用 non-interactive flag / 拆节点缩范围。
+- **失败**（非超时）→ retry_count += 1（这是少数仍需手动 Edit state.json 的场景，因为 CLI 不自动 +1）：
   - 未到 limit → 同分支新 commit 重试。
   - 到 limit → 停（`node-stuck`），在 NEEDS_REVIEW 里列出：失败信号、你试过什么、从 Escalation 菜单里**建议**哪条动作（改节点 md / 改图结构 / 弃 OR 分支）。人类改完重启即继续。
 
@@ -77,6 +87,7 @@ auto-dev node status <id> dev
 |-----|------|
 | `dag-schema-invalid` | `auto-dev validate` 退出 5 |
 | `node-stuck` | 节点重试达 limit，需要人类重编排 |
+| `node-timeout` | 连续 ≥2 次命令超时；提高 timeout / 改 non-interactive / 拆节点 |
 | `entry-missing` | 节点前置 tag 不存在 |
 | `scope-overflow` | 实际改动超节点 Scope |
 | `or-decision-needed` | spike 全部完成，等人类跑 `auto-dev or decide <g> <w>` |
