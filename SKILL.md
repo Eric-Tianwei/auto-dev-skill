@@ -1,155 +1,116 @@
 ---
 name: auto-dev
-version: 2.2.0
-description: Long-running autonomous AI coding loop for bypass-permissions sessions. Drives development from a schema-validated DAG (nodes + typed SEQ/AND/OR edges) stored as JSON, not narrated prose — PLAN.md is a rendered view and workflow logic reads the JSON. Handles topological preprocessing of common successors, a pre-dev inquiry phase that collapses OR nodes by asking humans about constraints (not technical choices), parallel spikes for unresolved OR branches via git worktrees, per-node Plan/Dev/Test cycles with three-level failure escalation (L0 retry / L1 redesign parent / L2 abandon branch), and a git topology kept isomorphic to the DAG (or/*, and/*, spike/* branches; node/*, decision/*, spike/result-* tags). Use when the user wants an unattended Claude Code session to plan and build a multi-node feature across hours with minimal interruptions.
+version: 3.0.0
+description: Long-running autonomous AI coding loop for bypass-permissions sessions. Plans as a DAG of per-node markdown specs plus a minimal JSON skeleton — not a giant narrated plan. Two workflows (plan / run), two-action failure handling (retry / stop for human reorchestration), validator only catches JSON/topology collapse and leaves graph quality to the AI. Use when the user wants an unattended Claude Code session to plan and build a multi-node feature across hours with minimal interruptions.
 ---
 
 # auto-dev
 
-用于在 `--dangerously-skip-permissions` 下持续数小时无人值守开发。计划以 DAG 建模，按拓扑顺序推进，在结构化检查点停下等用户。
+在 `--dangerously-skip-permissions` 下无人值守开发。计划是一张 DAG：骨架（id + 边）在 `.auto-dev/dag.json`，每个节点的详细 spec 在 `.auto-dev/nodes/<id>.md`。执行时逐个节点读 spec 跑 Plan/Dev/Test。
 
 ## Core Principles
 
 ```
- 1. Plan is a schema-validated graph → `.auto-dev/dag.json` is source of truth; PLAN.md is a view; prose never overrides fields
- 2. Depth causes drift              → minimize SEQ chain length (schema caps it at 3)
- 3. OR nodes                        → primary human decision points
- 4. Common successor nodes          → land on base_branch before branching (default: ai-main, NOT main)
- 5. Every node                      → entry assumptions + verifiable completion condition + scope limit + retry limit
- 6. Every edge                      → typed (SEQ / AND / OR) + rationale (both schema-required)
- 7. Test failure escalates          → L0 retry (in-node) → L1 redesign (modify parent) → L2 abandon (new OR candidate)
- 8. Git topology                    → must be isomorphic to DAG topology
- 9. Inquiry rule                    → never ask humans to pick a technical option; ask about the constraint that picks it
-10. OR branches                     → never merged with siblings; only one wins, the other is tagged and archived
-11. AI never touches upstream       → main/master is human-only; AI works on base_branch (ai-main) and humans promote
+1. 节点 = 一个 md 文件（frontmatter: name/description/deps/branch；正文: Entry/Completion/Scope/Retry/Escalation）
+2. DAG = 极简骨架：nodes[].id + edges[{from,to}] + or_groups（无边类型、无 rationale、无 kind）
+3. 图的质量由 AI 判断，validator 只兜底 JSON/拓扑崩塌
+4. 失败只分两态：重试 vs 停下让人类重编排（不再 L0/L1/L2）
+5. 每个节点 → 可验证 completion + scope limit + retry limit
+6. Git topology isomorphic to DAG（or/*, and/*, spike/* 分支；node/*, decision/*, spike/result-* tag）
+7. Inquiry 规则：不问技术选型，问驱动选型的业务/产品约束
+8. OR 分支 never merged with siblings；胜者留下，败者 tag + archive
+9. AI never touches upstream：main/master 人类专属；AI 在 base_branch (ai-main)，人类做 PR
 ```
 
-## 核心文件（项目根）
+## 核心文件
 
-- **`.auto-dev/dag.json`** — **计划的 source of truth**。节点 + 边（SEQ/AND/OR，每条必带 rationale）+ OR 组。schema 见 `.auto-dev/schema/dag.schema.json`（从 `templates/dag.schema.json` 拷来）。模板 `templates/dag.example.json`。**所有 workflow 逻辑（选下一节点、review-gate 判定、拓扑审计）读这个文件，不解析 PLAN.md 叙事。**
-- `.auto-dev/schema/dag.schema.json` — JSON Schema，校验 dag.json。
-- `PLAN.md` — **人类视图**（mermaid 图 + 节点表 + 节点规范文本）。从 dag.json 渲染或保持一致。不是决策依据。
-- `INQUIRY.md` — Inquiry 阶段输出：已折叠 OR 表 + 剩余待 spike 表。OR 决策结果落到 dag.json 的 `or_groups[].decided`。
-- `JOURNAL.md` — 每节点完成、每次升级、每次决策追加一段。
-- `NEEDS_REVIEW.md` — 触到停止条件时追加。
-- `.auto-dev/state.json` — 运行时状态，防 compact 丢失。字段：
+### Skill 侧（本仓）
+
+- `workflows/plan.md` — 规划阶段（合并 design + inquiry + spike）
+- `workflows/run.md` — 执行阶段（合并 node-cycle + review-gate）
+- `templates/node.md` — 节点 md 模板
+- `templates/dag.schema.json` — DAG JSON Schema
+- `templates/dag.example.json` — DAG 示例
+- `templates/JOURNAL.md` / `templates/NEEDS_REVIEW.md` — 产出模板
+- `scripts/validate_dag.py` — 零依赖 Python 校验器
+- `safety.md` — 安全边界
+
+### 使用者仓库侧
+
+```
+.auto-dev/
+  dag.json                 # 编排骨架
+  state.json               # 运行时状态
+  schema/dag.schema.json   # schema 副本
+  nodes/<id>.md            # 每节点一个 spec
+PLAN.md                    # 可选 mermaid 视图（从 dag.json 生成）
+JOURNAL.md
+NEEDS_REVIEW.md
+```
+
+`.auto-dev/state.json` 字段：
 
 ```json
 {
-  "plan_path": "PLAN.md",
-  "dag_path": ".auto-dev/dag.json",
-  "schema_path": ".auto-dev/schema/dag.schema.json",
-  "phase": "design|inquiry|spike|dev|review-gate",
+  "phase": "plan|dev|review-gate",
   "base_branch": "ai-main",
   "upstream_branch": "main",
-  "last_upstream_sync": "<ISO timestamp or null>",
-  "current_node": "<node id or null>",
+  "last_upstream_sync": "<ISO or null>",
+  "current_node": "<id or null>",
   "current_branch": "<branch>",
   "retry_count": 0,
-  "retry_limit_from_spec": 3,
-  "dag_cursor": "<next node id or null>",
+  "dag_cursor": "<next id or null>",
   "last_tag": "node/...",
-  "skill_version": "2.2.0"
+  "skill_version": "3.0.0"
 }
 ```
 
-这些文件的位置固定，不要放到别处。
+## Base / upstream 分离
 
-**校验脚本**：`scripts/validate_dag.py`（零依赖 Python 3，拷到使用者仓根同路径即可）。跑 `python3 scripts/validate_dag.py .auto-dev/dag.json`，退出码非零即停——design 阶段、每次修改 dag.json 后、review-gate 触发前都跑一次。
+AI 在 `base_branch`（默认 `ai-main`）工作；`upstream_branch`（默认 `main`）是人类主线。
 
-**dag.json 与 PLAN.md 的关系**：dag.json 是数据，PLAN.md 是视图。两者冲突时以 dag.json 为准。AI 修改计划时先改 dag.json（跑校验），再同步 PLAN.md 的 mermaid / 表格 / 节点规范段落。绝不允许把"规划决策"只写在 PLAN.md 的自然语言里而不落到 dag.json 字段。
+| 动作 | 允许方 |
+|------|--------|
+| `base_branch` 本地 commit | AI |
+| 从 `base_branch` 开 `or/*` `and/*` `spike/*` | AI |
+| `git push base_branch` 到远端 | AI 不得（除非 safety.md 显式授权） |
+| `base_branch` → `upstream_branch` 合并/PR | 仅人类 |
+| `upstream_branch` → `base_branch` 同步 | AI 可；冲突则停（`upstream-sync-conflict`） |
+| 直接写 `upstream_branch` | AI 绝不（`protected-push-attempted`） |
 
-## Base branch 与 upstream 同步协议
+**首次初始化**：`.auto-dev/state.json` 不存在时读取/询问 `base_branch` / `upstream_branch`，默认 `ai-main` / `main`；若 base 不存在从当前 HEAD 建。
 
-AI 在 `base_branch`（默认 `ai-main`）上工作；`upstream_branch`（默认 `main`）是人类主线。两者职责分离：
+**同步时机**：`phase=plan → dev` 切换时、每次开 `or/*` 分支前跑 `git fetch && git log --oneline base_branch..upstream_branch`。可快进则 AI 自合；冲突则停。
 
-| 动作 | 允许方 | 说明 |
-|------|--------|------|
-| `base_branch` 本地 commit（common successor 落点） | AI | 核心工作模式 |
-| 从 `base_branch` 开 `or/*` `and/*` `spike/*` 分支 | AI | 必须从 `base_branch` 出，不得从 upstream 出 |
-| `git push` `base_branch` 到远端 | AI 不得 | 除非用户在 safety.md 显式授权 |
-| `base_branch` → `upstream_branch` 合并/PR | 仅人类 | AI 从不触发；这是人类 review 边界 |
-| `upstream_branch` → `base_branch` 同步 | AI 可触发 | 见下方 |
-| 直接 commit / push 到 `upstream_branch` | AI 绝不 | 任何形式均触发 `protected-push-attempted` 停下 |
+## 主循环
 
-**首次初始化**（`phase=design` 进入时）：
-- `.auto-dev/state.json` 不存在 → 读取/询问 `base_branch` 与 `upstream_branch`，默认 `ai-main` / `main`。
-- 若 `base_branch` 分支不存在 → 从当前 HEAD（通常是 upstream 最新）创建：`git branch ai-main && git checkout ai-main`。
+1. 读 `.auto-dev/state.json`，不存在则初始化 `phase=plan`。
+2. 若 `phase != plan`，先跑 `python3 scripts/validate_dag.py .auto-dev/dag.json`。非零 → 停（`dag-schema-invalid`）。
+3. 按 `phase` 选 workflow：
+   - `plan` → `workflows/plan.md`。完成后 `phase=dev`。
+   - `dev` → `workflows/run.md`：按拓扑序取下一可做节点，读 `.auto-dev/nodes/<id>.md` 跑 Plan/Dev/Test。
+   - `review-gate` → 已写好 NEEDS_REVIEW，停。
+4. 节点完成 → 更新 dag.json 里该节点 `status="done"` / `completion_tag` → 打 git tag → 追加 JOURNAL → 回第 2 步。
 
-**Upstream → base 同步时机**：
-- 每次 `phase` 从 `design` 或 `review-gate` 切到 `dev` 时检查一次。
-- 每次新开 OR 分支前检查一次（OR 首节点 `git checkout -b or/*` 之前）。
-- 检查命令：`git fetch && git log --oneline base_branch..upstream_branch`。若有新 commit：
-  - 无冲突可快进 / 简单 merge → AI 自行 `git merge --ff-only upstream_branch`（或 `--no-ff`），追加 JOURNAL 一行。
-  - 有冲突 → 停下写 NEEDS_REVIEW（`upstream-sync-conflict`），等人类处理。
+## Subagent 使用
 
-**base → upstream 交付**（只由人类执行）：
-- AI 遇到 `or-branch-review` 等 review-gate 时停下并写 NEEDS_REVIEW，指引用户在人类环境下发起 PR 从 `base_branch`（或 `or/*`）到 `upstream_branch`。AI 不 push、不开 PR、不 merge upstream。
+只在这四类场景派：
 
-## 主循环（DAG 游标驱动）
+1. **深度搜索** → `Explore`（只读）。
+2. **Type B OR spike** → `general-purpose` + `isolation: worktree`，每 OR 候选一个。
+3. **每节点 commit 前独立 code review** → `general-purpose`。
+4. **节点内最小复现/辅助搜索**。
 
-1. 读 `.auto-dev/state.json`。不存在 → 初始化，`phase=design`。
-2. `phase != design` 时，**先跑 `python3 scripts/validate_dag.py .auto-dev/dag.json`**。退出码非零 → 停，写 NEEDS_REVIEW（`dag-schema-invalid`），不进后续。
-3. 根据 `phase` 选 workflow：
-   - `design`  → 读 `workflows/design.md`，产出 `.auto-dev/dag.json`（source of truth）+ `PLAN.md`（视图）。跑校验通过后 `phase=inquiry`。
-   - `inquiry` → 读 `workflows/inquiry.md`，产出 `INQUIRY.md`，同步更新 dag.json 里 `or_groups[].decided`。**此阶段是唯一允许 AskUserQuestion 的窗口**。完成后：仍有 Type B OR → `phase=spike`；否则 → `phase=dev`。
-   - `spike`   → 读 `workflows/spike.md`，派 worktree subagent 并行 spike。全部完成 → 触发 review-gate（`or-decision-needed`），写 NEEDS_REVIEW 停下。
-   - `dev`     → 读 `workflows/node-cycle.md`，**从 dag.json 读节点规范**，按拓扑序选下一个可做节点（common successor 优先，然后沿已进入的 OR 分支推进），跑 Plan/Dev/Test。
-   - `review-gate` → 读 `workflows/review-gate.md`，**从 dag.json.edges 读边类型判定 checkpoint**，写 NEEDS_REVIEW 后停。
-4. 节点完成 → 更新 dag.json 里该节点 `status="done"` + `completion_tag="node/..."`、打 git tag、更新 state.json、追加 JOURNAL → 回第 2 步。
-
-## 停止条件（任一触发即停下写 NEEDS_REVIEW）
-
-- **`dag.json` schema 校验失败**（`validate_dag.py` 退出码非零） → 停（`dag-schema-invalid`）。
-- 节点 Level 0 重试达该节点 spec 里声明的 N 次 → 升 L1 → 停。
-- 节点判定为 Level 1 升级（父节点需修改） → 停，等人类批准。
-- 节点判定为 Level 2 升级（OR 分支假设破产） → 停，等人类批准新 OR 候选。
-- 所有 spike 完成（`phase=spike` 结束） → 停，等 OR 决策。
-- OR 分支端到端开发完成 → 停，等 PR review。
-- SEQ 链 checkpoint（**连续 2–3 条 type=SEQ 边首尾相连完成**）→ 停，方向 sanity check。判定按 dag.json.edges 追溯，不按"连续做完 N 个节点"计数——AND 兄弟节点连续完成不触发本项。
-- 命中 `safety.md` 黑名单。
-- 测试基线相对 DAG 起始 commit 回退（原本通过的用例现在失败）。
-- 对 `upstream_branch`（默认 `main`）/ `master` 的任何写操作（本地 commit、checkout 后 commit、merge、rebase、push） → 停。本地 main 也禁止 —— AI 的落点永远是 `base_branch`。
-- 向远端 push `base_branch`（默认 `ai-main`）/ 受保护分支（除非 safety.md 显式授权） → 停。
-- `upstream_branch` → `base_branch` 同步出现冲突 → 停（`upstream-sync-conflict`）。
-- 需要的凭证/外部服务不可用。
-
-停下时：`NEEDS_REVIEW.md` 追加一段（时间、节点 id / tag、停止原因 tag、现象、已尝试、建议），结束会话，不要自己绕过。
-
-## Subagent 使用原则
-
-只在这四类场景派 subagent；其余主循环亲自做。
-
-1. **深度搜索** → `subagent_type: Explore`。
-2. **Type B OR spike** → `general-purpose` + `isolation: worktree`。由 `workflows/spike.md` 触发，每个 OR 一个 agent，prompt 必含假设/判据/预算，回传 `spike/result-*` tag + 一页结论。
-3. **独立 code review** → 每次节点 commit 前派一个 agent 独立审查 diff（不再局限于 bug 修复）。
-4. **节点内的最小复现或辅助搜索** → 按 `workflows/node-cycle.md` 需要派。
-
-**硬规则**：subagent 不得修改 `.auto-dev/dag.json` / `.auto-dev/schema/` / `.auto-dev/state.json` / `PLAN.md` / `INQUIRY.md` / `JOURNAL.md` / `NEEDS_REVIEW.md` / git 分支或 tag 状态。状态改动一律由主循环在看到 subagent 结果后执行。
-
-## 工作流文档
-
-需要时按阶段加载，不要首轮全读。
-
-- `workflows/design.md` — DAG 建模与节点规范（产出 dag.json + PLAN 视图）
-- `workflows/inquiry.md` — 约束型提问，折叠 Type A OR（写 or_groups.decided）
-- `workflows/spike.md` — Type B OR 并行 spike
-- `workflows/node-cycle.md` — 节点 Plan/Dev/Test + 三级失败升级 + git 分支/tag 操作
-- `workflows/review-gate.md` — 结构化人类检查点清单（按 dag.edges 判定）
-- `templates/dag.schema.json` — DAG JSON Schema（权威不变量定义）
-- `templates/dag.example.json` — DAG 示例
-- `scripts/validate_dag.py` — 零依赖校验器（每次 dag.json 改动后跑）
-- `safety.md` — 安全边界黑白名单
+**硬规则**：subagent 不得修改 `.auto-dev/**` / `PLAN.md` / `JOURNAL.md` / `NEEDS_REVIEW.md` / git 分支或 tag 状态。状态改动由主循环执行。
 
 ## 执行模式
 
-- **不要进入 Plan 模式**：不用 `EnterPlanMode` / `ExitPlanMode`，不生成计划后等用户确认。
-- **不要询问确认**：不用 `AskUserQuestion`，**除了** `workflows/inquiry.md` 阶段——那是唯一允许的提问窗口，进入 dev 后立即回到无人值守。
-- Inquiry 的问题必须遵循约束翻译规则（见 `workflows/inquiry.md`）：不问技术选型，只问驱动技术选型的业务/产品约束。
-- 唯一"停下"的方式是触发停止条件 → 写 NEEDS_REVIEW → 结束。
+- 不进入 Plan 模式（不用 `EnterPlanMode`），不等用户确认。
+- 不 `AskUserQuestion`，**例外**：`plan.md` 的 Inquiry 步骤——进 dev 后立即回到无人值守。
+- 唯一"停下"方式：触发停止条件 → 写 NEEDS_REVIEW → 结束。
 
 ## 与用户沟通
 
-- 默认不打断。节点完成与升级事件都落到 JOURNAL，用户自己看。
-- 只有停止条件触发时才停下，一两句话告诉用户"停在哪、为什么、看 NEEDS_REVIEW"。
-- JOURNAL / NEEDS_REVIEW 条目保持 3–6 行，不写冗长总结。
+- 默认不打断。节点完成/失败都落 JOURNAL，用户自看。
+- 停止时一两句话告诉用户停在哪、看 NEEDS_REVIEW。
+- JOURNAL / NEEDS_REVIEW 条目 3–6 行，不写冗长总结。
