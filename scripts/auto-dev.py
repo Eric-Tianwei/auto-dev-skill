@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,6 +59,18 @@ def iso_now() -> str:
 def require_dot() -> None:
     if not DOT.exists():
         die(2, ".auto-dev/ not found. Run `auto-dev init` first.")
+
+
+def find_dot_root(start: Path) -> Path | None:
+    """Walk up from start looking for a `.auto-dev/` directory.
+
+    Returns the directory containing `.auto-dev/`, or None if not found.
+    """
+    cur = start.resolve()
+    for p in [cur, *cur.parents]:
+        if (p / ".auto-dev").is_dir():
+            return p
+    return None
 
 
 def load_json(path: Path) -> dict:
@@ -178,6 +192,19 @@ def save_dag_checked(dag: dict) -> None:
     if errs:
         die(2, "would leave dag inconsistent: " + "; ".join(errs))
     save_json_atomic(DAG_PATH, dag)
+
+
+def compute_ready_cursor(dag: dict) -> str | None:
+    """First node id that is pending and has all parents done, or None."""
+    status_by_id = {n["id"]: n["status"] for n in dag.get("nodes", [])}
+    parents: dict[str, list[str]] = {}
+    for e in dag.get("edges", []):
+        parents.setdefault(e["to"], []).append(e["from"])
+    ready = sorted(
+        nid for nid, st in status_by_id.items()
+        if st == "pending" and all(status_by_id.get(p) == "done" for p in parents.get(nid, []))
+    )
+    return ready[0] if ready else None
 
 
 # ---------- frontmatter mutation ----------
@@ -461,8 +488,44 @@ def cmd_node_status(args: argparse.Namespace) -> int:
             die(1, "--tag only valid when setting status=done")
         n["completion_tag"] = args.tag
     save_dag_checked(dag)
+
+    # Sync runtime fields in state.json (bookkeeping — mechanical, not a
+    # decision). Keeps AI from having to Edit state.json on every status change.
+    extras: list[str] = []
+    if STATE_PATH.exists():
+        state = load_json(STATE_PATH)
+        dirty = False
+        if args.status_value == "dev":
+            branch = None
+            md_path = NODES_DIR / f"{args.id}.md"
+            if md_path.exists():
+                branch = read_fm_field(md_path.read_text(encoding="utf-8"), "branch")
+            state["current_node"] = args.id
+            if branch:
+                state["current_branch"] = branch
+            state["retry_count"] = 0
+            dirty = True
+            extras.append(f"current={args.id}")
+            if branch:
+                extras.append(f"branch={branch}")
+            extras.append("retry=0")
+        elif args.status_value == "done":
+            if args.tag is not None:
+                state["last_tag"] = args.tag
+            state["retry_count"] = 0
+            cursor = compute_ready_cursor(dag)
+            state["dag_cursor"] = cursor
+            if state.get("current_node") == args.id:
+                state["current_node"] = None
+            dirty = True
+            extras.append(f"cursor={cursor or '-'}")
+            extras.append("retry=0")
+        if dirty:
+            save_json_atomic(STATE_PATH, state)
+
     tag_part = f" tag={args.tag}" if args.tag else ""
-    emit(f"> node:{args.id} status={args.status_value}{tag_part}")
+    extras_part = f" ({', '.join(extras)})" if extras else ""
+    emit(f"> node:{args.id} status={args.status_value}{tag_part}{extras_part}")
     return 0
 
 
@@ -590,20 +653,12 @@ def cmd_phase_set(args: argparse.Namespace) -> int:
     if args.phase == "dev":
         dag = load_json(DAG_PATH)
         # transition to dev requires a structurally sound graph
+        sys.path.insert(0, str(SCRIPT_DIR))
         from validate_dag import validate as vd_validate  # type: ignore
         errs = vd_validate(dag)
         if errs:
             die(5, "validate failed; fix before phase=dev:\n  " + "\n  ".join(errs))
-        # compute first ready node
-        status_by_id = {n["id"]: n["status"] for n in dag.get("nodes", [])}
-        parents: dict[str, list[str]] = {}
-        for e in dag.get("edges", []):
-            parents.setdefault(e["to"], []).append(e["from"])
-        ready = sorted(
-            nid for nid, st in status_by_id.items()
-            if st == "pending" and all(status_by_id.get(p) == "done" for p in parents.get(nid, []))
-        )
-        state["dag_cursor"] = ready[0] if ready else None
+        state["dag_cursor"] = compute_ready_cursor(dag)
     else:
         state["dag_cursor"] = None
 
@@ -750,6 +805,120 @@ def cmd_nodes(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_git(gargs: list[str], cwd: Path) -> tuple[int, str, str]:
+    r = subprocess.run(["git", *gargs], cwd=cwd, capture_output=True, text=True)
+    return r.returncode, r.stdout, r.stderr
+
+
+def _passthrough_git_failure(action: str, rc: int, stderr: str) -> None:
+    """Print git stderr unchanged and exit with git's return code."""
+    if stderr:
+        sys.stderr.write(stderr if stderr.endswith("\n") else stderr + "\n")
+    sys.stderr.write(f"! finish: git {action} failed (rc={rc})\n")
+    sys.exit(rc)
+
+
+def _normalize_completion_bullet(item: str) -> str:
+    """Strip [ ] / [x] / [X] prefix from a Completion bullet."""
+    for prefix in ("[ ]", "[x]", "[X]"):
+        if item.startswith(prefix):
+            return item[len(prefix):].lstrip()
+    return item
+
+
+def cmd_finish(args: argparse.Namespace) -> int:
+    require_dot()
+    dag = load_json(DAG_PATH)
+    n = find_node(dag, args.id)
+    if n is None:
+        die(3, f"node:{args.id} not found")
+
+    md_path = NODES_DIR / f"{args.id}.md"
+    if not md_path.exists():
+        die(3, f"node md not found: {md_path}")
+    md = md_path.read_text(encoding="utf-8")
+    desc = read_fm_field(md, "description") or args.id
+    branch = read_fm_field(md, "branch") or "-"
+    completion_items = extract_bullets(md, "Completion")
+    if not completion_items:
+        for hdr in ("Completion — fast", "Completion — full"):
+            completion_items.extend(extract_bullets(md, hdr))
+
+    tag = args.tag or f"node/{args.id}"
+
+    # git working directory: --project > caller's original cwd (pre-chdir).
+    original_cwd = getattr(args, "_original_cwd", Path.cwd())
+    git_cwd = Path(args.project).resolve() if args.project else original_cwd
+
+    # preflight: does the tag already exist?
+    rc, out, err = _run_git(["tag", "-l", tag], git_cwd)
+    if rc != 0:
+        _passthrough_git_failure("tag -l", rc, err)
+    if out.strip():
+        die(4, f"tag {tag} already exists in {git_cwd}")
+
+    # stage
+    rc, _, err = _run_git(["add", "-A"], git_cwd)
+    if rc != 0:
+        _passthrough_git_failure("add -A", rc, err)
+
+    # something staged? rc 0 = no diff, 1 = diff, >1 = error
+    rc, _, err = _run_git(["diff", "--cached", "--quiet"], git_cwd)
+    if rc == 0:
+        die(2, "nothing staged after `git add -A`; node produced no changes "
+               "(if this is intentional, use `auto-dev node status done --tag` directly)")
+    if rc > 1:
+        _passthrough_git_failure("diff --cached", rc, err)
+
+    # build commit message
+    lines = [f"{args.type}({args.id}): {desc}"]
+    if completion_items:
+        lines.extend(["", "Completion:"])
+        for item in completion_items:
+            lines.append(f"- [x] {_normalize_completion_bullet(item)}")
+    if args.extra_message:
+        lines.extend(["", args.extra_message])
+    lines.extend(["", "Co-Authored-By: Claude <noreply@anthropic.com>"])
+    commit_msg = "\n".join(lines)
+
+    rc, _, err = _run_git(["commit", "-m", commit_msg], git_cwd)
+    if rc != 0:
+        _passthrough_git_failure("commit", rc, err)
+
+    rc, sha_out, err = _run_git(["rev-parse", "--short", "HEAD"], git_cwd)
+    if rc != 0:
+        _passthrough_git_failure("rev-parse HEAD", rc, err)
+    sha7 = sha_out.strip()
+
+    rc, _, err = _run_git(["tag", tag], git_cwd)
+    if rc != 0:
+        _passthrough_git_failure(f"tag {tag}", rc, err)
+
+    # mark node done (reuses P0-B state.json sync)
+    ns_args = argparse.Namespace(id=args.id, status_value="done", tag=tag)
+    cmd_node_status(ns_args)
+
+    # append JOURNAL entry. cwd is repo root (chdir'd in main()).
+    journal = Path("JOURNAL.md")
+    now = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
+    entry = [
+        "",
+        f"## {now} · {tag} · {branch}",
+        f"- 结论: {desc}",
+    ]
+    if args.note:
+        entry.append(f"- 备注: {args.note}")
+    block = "\n".join(entry) + "\n"
+    if journal.exists():
+        with journal.open("a", encoding="utf-8") as f:
+            f.write(block)
+    else:
+        journal.write_text(block.lstrip("\n"), encoding="utf-8")
+
+    emit(f"✓ finish:{args.id} tag={tag} commit={sha7}")
+    return 0
+
+
 def cmd_log(args: argparse.Namespace) -> int:
     if not EVENTS_LOG.exists():
         die(3, f"{EVENTS_LOG}: not found")
@@ -848,6 +1017,23 @@ def build_parser() -> argparse.ArgumentParser:
                     help="show only nodes with this status")
     nl.set_defaults(func=cmd_nodes)
 
+    fn = sub.add_parser("finish",
+                        help="commit + tag + mark node done + append JOURNAL (one shot)")
+    fn.add_argument("id", help="node id to finish")
+    fn.add_argument("--type", default="feat",
+                    help="conventional commit type (default: feat)")
+    fn.add_argument("--extra-message", dest="extra_message", default=None,
+                    help="free-text appended to commit body (the 'why')")
+    fn.add_argument("--note", default=None,
+                    help="short note appended to JOURNAL entry")
+    fn.add_argument("--tag", default=None,
+                    help="git tag name (default: node/<id>)")
+    fn.add_argument("--project", default=None,
+                    help="git working directory (default: caller's cwd before chdir)")
+    fn.add_argument("--skip-review", dest="skip_review", action="store_true",
+                    help="marker only; independent code review is handled outside the CLI")
+    fn.set_defaults(func=cmd_finish)
+
     lg = sub.add_parser("log", help="print events.log (causal history)")
     lg.add_argument("--tail", type=int, default=50, help="show last N lines (default 50)")
     lg.add_argument("--head", type=int, default=None, help="show first N lines")
@@ -859,6 +1045,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv[1:])
+    # chdir up to the repo root (closest ancestor containing .auto-dev/)
+    # so the module-level relative paths (DOT, STATE_PATH, ...) resolve
+    # correctly regardless of where the user invoked the CLI from.
+    # `init` is exempt: it must create .auto-dev/ at the caller's cwd.
+    original_cwd = Path.cwd()
+    args._original_cwd = original_cwd  # noqa: SLF001 (stashed for commands like finish)
+    if args.cmd != "init":
+        root = find_dot_root(original_cwd)
+        if root is not None and root != original_cwd:
+            os.chdir(root)
     return args.func(args)
 
 

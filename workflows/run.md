@@ -24,7 +24,7 @@ auto-dev status
 auto-dev node status <id> dev
 ```
 
-并直接 Edit state.json：`current_node=<id>` / `current_branch=<branch>` / `retry_count=0`（这些是高频 bookkeeping，不走 CLI）。
+`current_node` / `current_branch`（读自 frontmatter） / `retry_count=0` 由 CLI 自动写 state.json。不用手动 Edit。
 
 ### 3. 切分支
 
@@ -51,19 +51,19 @@ auto-dev node status <id> dev
 
 - **通过** → 进通过流程。
 - **基线回退**（原本通过的测试现在失败）→ 停（`test-baseline-regression`）。
-- **失败** → retry_count += 1（直接 Edit state.json）：
+- **失败** → retry_count += 1（这是少数仍需手动 Edit state.json 的场景，因为 CLI 不自动 +1）：
   - 未到 limit → 同分支新 commit 重试。
   - 到 limit → 停（`node-stuck`），在 NEEDS_REVIEW 里列出：失败信号、你试过什么、从 Escalation 菜单里**建议**哪条动作（改节点 md / 改图结构 / 弃 OR 分支）。人类改完重启即继续。
 
 ### 7. 通过流程
 
 1. **独立 code review**：commit 前派 `general-purpose` subagent 看 diff，问：触到根因了吗？有回归风险吗？是否用"绕过"代替"修复"（吞异常、改测试期望、加特殊分支）？有问题 → 处理后重 test。
-2. **Commit**：`<type>(<node-id>): <summary>`，body 带 completion 通过证据。
-3. **Tag**：`git tag node/<id>`。
-4. **AND merge-back**（节点 branch 形如 `and/*`）：回父分支 `git merge --no-ff and/<parent>-<desc>`，父分支打 tag 标记已回合。
-5. **标完成**：`auto-dev node status <id> done --tag node/<id>`。CLI 内部自洽检查；若会破坏 dag 一致性 → 停（`dag-schema-invalid`）。
-6. **JOURNAL**：追加一段（时间 / tag / 结论 / 下一节点）。
-7. **state.json**：直接 Edit `last_tag` 指向新 tag，`retry_count=0`。`dag_cursor` 可用 `auto-dev status` 查当前 ready 列表后手动改（或跑 `auto-dev phase set dev` 重算一次）。
+2. **一把梭收尾**：
+   ```
+   auto-dev finish <id> [--extra-message "why"] [--note "journal note"]
+   ```
+   CLI 内部依次跑：`git add -A` → `git commit`（message 自动拼 `<type>(<id>): <desc>` + Completion checklist + `--extra-message` + Co-Authored-By trailer）→ `git tag node/<id>` → `node status done --tag`（触发 state.json 自动同步：`last_tag / retry_count=0 / dag_cursor`）→ JOURNAL append 一段。任一步 git 失败，stderr 原样透传、退出码透传。不会吞错也不会重试。
+3. **AND merge-back**（节点 branch 形如 `and/*`）：finish 之后回父分支 `git merge --no-ff and/<parent>-<desc>`，父分支打 tag 标记已回合。此步仍手动，因为合并不是机械操作。
 
 ### 8. OR 分支完成检查
 
