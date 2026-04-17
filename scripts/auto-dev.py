@@ -761,78 +761,88 @@ def cmd_log(args: argparse.Namespace) -> int:
 # ---------- main ----------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="auto-dev", description="auto-dev orchestration CLI")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    p = argparse.ArgumentParser(
+        prog="auto-dev",
+        description="auto-dev orchestration CLI. Treat this script as opaque: "
+                    "use `<cmd> --help` for args, SKILL.md for capabilities. "
+                    "Do not read the source when running the skill.",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="<cmd>")
 
-    i = sub.add_parser("init", help="initialize .auto-dev/")
-    i.add_argument("--base", default="ai-main")
-    i.add_argument("--upstream", default="main")
-    i.add_argument("--force", action="store_true")
+    i = sub.add_parser("init", help="initialize .auto-dev/ skeleton")
+    i.add_argument("--base", default="ai-main", help="AI base branch (default: ai-main)")
+    i.add_argument("--upstream", default="main", help="human upstream branch (default: main)")
+    i.add_argument("--force", action="store_true", help="overwrite existing .auto-dev/")
     i.set_defaults(func=cmd_init)
 
-    node = sub.add_parser("node", help="node ops")
-    node_sub = node.add_subparsers(dest="node_cmd", required=True)
-    na = node_sub.add_parser("add", help="add node + optional deps")
-    na.add_argument("id")
-    na.add_argument("--deps", default="", help="comma-separated dep ids")
-    na.add_argument("--branch", default=None)
-    na.add_argument("--or-of", dest="or_of", default=None)
-    na.add_argument("--name", default=None)
-    na.add_argument("--desc", default=None)
+    node = sub.add_parser("node", help="node ops (add / rm / status)")
+    node_sub = node.add_subparsers(dest="node_cmd", required=True, metavar="<op>")
+    na = node_sub.add_parser("add", help="create node md + register in dag.json")
+    na.add_argument("id", help="kebab-case node id")
+    na.add_argument("--deps", default="", help="comma-separated dep ids (edges auto-created)")
+    na.add_argument("--branch", default=None,
+                    help="git branch for this node (default: base_branch). "
+                         "Conventions: or/<desc> for OR head, and/<parent>-<desc> for AND member")
+    na.add_argument("--or-of", dest="or_of", default=None,
+                    help="attach to an existing OR group (group must be created first)")
+    na.add_argument("--name", default=None, help="frontmatter name (default: <id>)")
+    na.add_argument("--desc", default=None, help="frontmatter description")
     na.set_defaults(func=cmd_node_add)
-    nr = node_sub.add_parser("rm", help="remove node + its edges")
+    nr = node_sub.add_parser("rm", help="remove node; cascades to edges, child deps, OR groups")
     nr.add_argument("id")
     nr.set_defaults(func=cmd_node_rm)
-    ns = node_sub.add_parser("status", help="set node status")
-    ns.add_argument("id")
-    ns.add_argument("status_value", choices=NODE_STATUSES)
-    ns.add_argument("--tag", default=None)
-    ns.set_defaults(func=cmd_node_status)
+    ns_cmd = node_sub.add_parser("status", help="set node status (done / dev / abandoned / ...)")
+    ns_cmd.add_argument("id")
+    ns_cmd.add_argument("status_value", choices=NODE_STATUSES, metavar="status")
+    ns_cmd.add_argument("--tag", default=None,
+                        help="completion_tag (only with status=done)")
+    ns_cmd.set_defaults(func=cmd_node_status)
 
-    edge = sub.add_parser("edge", help="edge ops")
-    edge_sub = edge.add_subparsers(dest="edge_cmd", required=True)
-    ea = edge_sub.add_parser("add")
+    edge = sub.add_parser("edge", help="edge ops (add / rm); syncs child md deps")
+    edge_sub = edge.add_subparsers(dest="edge_cmd", required=True, metavar="<op>")
+    ea = edge_sub.add_parser("add", help="add edge from→to (refuses cycles)")
     ea.add_argument("frm", metavar="from")
     ea.add_argument("to")
     ea.set_defaults(func=cmd_edge_add)
-    er = edge_sub.add_parser("rm")
+    er = edge_sub.add_parser("rm", help="remove edge from→to")
     er.add_argument("frm", metavar="from")
     er.add_argument("to")
     er.set_defaults(func=cmd_edge_rm)
 
-    og = sub.add_parser("or", help="or-group ops")
-    og_sub = og.add_subparsers(dest="or_cmd", required=True)
-    oc = og_sub.add_parser("create")
-    oc.add_argument("id")
+    og = sub.add_parser("or", help="OR-group ops (create / decide)")
+    og_sub = og.add_subparsers(dest="or_cmd", required=True, metavar="<op>")
+    oc = og_sub.add_parser("create", help="create OR group from existing candidate nodes")
+    oc.add_argument("id", help="or-group id")
     oc.add_argument("--candidates", required=True, help="comma-separated node ids (>= 2)")
     oc.set_defaults(func=cmd_or_create)
-    od = og_sub.add_parser("decide")
-    od.add_argument("id")
-    od.add_argument("winner")
+    od = og_sub.add_parser("decide", help="pick winner; losers auto-marked abandoned")
+    od.add_argument("id", help="or-group id")
+    od.add_argument("winner", help="winning candidate id")
     od.set_defaults(func=cmd_or_decide)
 
-    ph = sub.add_parser("phase", help="phase ops")
-    ph_sub = ph.add_subparsers(dest="phase_cmd", required=True)
-    ps = ph_sub.add_parser("set")
+    ph = sub.add_parser("phase", help="phase ops (plan / dev / review-gate)")
+    ph_sub = ph.add_subparsers(dest="phase_cmd", required=True, metavar="<op>")
+    ps = ph_sub.add_parser("set", help="set phase; dev runs validate first + computes cursor")
     ps.add_argument("phase", choices=PHASES)
     ps.set_defaults(func=cmd_phase_set)
 
-    v = sub.add_parser("validate")
+    v = sub.add_parser("validate", help="run schema/topology validator (exit 5 on failure)")
     v.set_defaults(func=cmd_validate)
 
-    st = sub.add_parser("status")
+    st = sub.add_parser("status", help="current phase / cursor / ready / counts")
     st.add_argument("--json", action="store_true")
     st.set_defaults(func=cmd_status)
 
-    ns = sub.add_parser("nodes", help="dense per-node summary (for edge-wiring)")
-    ns.add_argument("--json", action="store_true")
-    ns.add_argument("--filter", choices=NODE_STATUSES, default=None,
+    nl = sub.add_parser("nodes",
+                        help="dense per-node view: id + status + deps + needs + produces")
+    nl.add_argument("--json", action="store_true")
+    nl.add_argument("--filter", choices=NODE_STATUSES, default=None,
                     help="show only nodes with this status")
-    ns.set_defaults(func=cmd_nodes)
+    nl.set_defaults(func=cmd_nodes)
 
-    lg = sub.add_parser("log")
-    lg.add_argument("--tail", type=int, default=50)
-    lg.add_argument("--head", type=int, default=None)
+    lg = sub.add_parser("log", help="print events.log (causal history)")
+    lg.add_argument("--tail", type=int, default=50, help="show last N lines (default 50)")
+    lg.add_argument("--head", type=int, default=None, help="show first N lines")
     lg.set_defaults(func=cmd_log)
 
     return p

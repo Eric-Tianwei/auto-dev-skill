@@ -28,6 +28,8 @@ description: Long-running autonomous AI coding loop for bypass-permissions sessi
 
 调用形式：`python3 <skill-dir>/scripts/auto-dev.py <cmd>`。下文写 `auto-dev` 为简称。
 
+**把 `scripts/auto-dev.py` 当黑盒**——执行时不要 Read 它的源码。能力查本节速查表；参数查 `auto-dev <cmd> --help`；实在搞不定看错误输出（`! <reason>`）+ 退出码。读源码 = 把 JSON/state 实现细节塞回你上下文，等于白抽象。例外：**你在开发/修改这个 skill 本身**。
+
 | 命令 | 作用 |
 |---|---|
 | `init [--base B] [--upstream U] [--force]` | 建 `.auto-dev/` 骨架（dag.json / state.json / nodes/ / schema/ / events.log） |
